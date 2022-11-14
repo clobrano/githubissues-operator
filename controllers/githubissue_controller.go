@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,10 +28,21 @@ import (
 	trainingv1alpha1 "github.com/clobrano/githubissues-operator/api/v1alpha1"
 )
 
+type GithubTicket struct {
+	Title, Description string
+}
+
+type GithubClient interface {
+	GetTickets() ([]GithubTicket, error)
+	CreateTicket(GithubTicket) error
+	UpdateTicket(GithubTicket) error
+}
+
 // GithubIssueReconciler reconciles a GithubIssue object
 type GithubIssueReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme     *runtime.Scheme
+	RepoClient GithubClient
 }
 
 //+kubebuilder:rbac:groups=training.redhat.com,resources=githubissues,verbs=get;list;watch;create;update;patch;delete
@@ -47,10 +59,34 @@ type GithubIssueReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	l := log.FromContext(ctx)
+	ghi := &trainingv1alpha1.GithubIssue{}
+	err := r.Get(ctx, req.NamespacedName, ghi)
+	if err != nil {
+		l.Error(err, "failed fetching GithubIssue resources", "object", ghi)
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 
-	// TODO(user): your logic here
+		return ctrl.Result{}, err
+	}
 
+	tickets, err := r.RepoClient.GetTickets()
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	for _, t := range tickets {
+		if t.Title != ghi.Spec.Title {
+			continue
+		}
+		if t.Description != ghi.Spec.Description {
+			r.RepoClient.UpdateTicket(GithubTicket{ghi.Spec.Title, ghi.Spec.Description})
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+	r.RepoClient.CreateTicket(GithubTicket{ghi.Spec.Title, ghi.Spec.Description})
 	return ctrl.Result{}, nil
 }
 
