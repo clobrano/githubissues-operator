@@ -20,6 +20,8 @@ import (
 	"context"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,13 +31,14 @@ import (
 )
 
 type GithubTicket struct {
-	Title, Description string
+	Title, Description, State string
 }
 
 type GithubClient interface {
 	GetTickets() ([]GithubTicket, error)
 	CreateTicket(GithubTicket) error
 	UpdateTicket(GithubTicket) error
+	IssueHasPR(GithubTicket) bool
 }
 
 // GithubIssueReconciler reconciles a GithubIssue object
@@ -60,10 +63,10 @@ type GithubIssueReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-	ghi := &trainingv1alpha1.GithubIssue{}
-	err := r.Get(ctx, req.NamespacedName, ghi)
+	gi := &trainingv1alpha1.GithubIssue{}
+	err := r.Get(ctx, req.NamespacedName, gi)
 	if err != nil {
-		l.Error(err, "failed fetching GithubIssue resources", "object", ghi)
+		l.Error(err, "failed fetching GithubIssue resources", "object", gi)
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -71,22 +74,70 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	giOrig := gi.DeepCopy()
+	defer func() {
+		mergeFrom := client.MergeFrom(giOrig)
+		if streamBytes, err := mergeFrom.Data(gi); err != nil {
+			return
+		} else if string(streamBytes) == "{}" {
+			return
+		}
+		err := r.Client.Status().Patch(ctx, gi, mergeFrom, &client.PatchOptions{})
+		if err != nil {
+			l.Error(err, "failed to patch Githubissue status")
+			return
+		}
+	}()
+
 	tickets, err := r.RepoClient.GetTickets()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	for _, t := range tickets {
-		if t.Title != ghi.Spec.Title {
+		if t.Title != gi.Spec.Title {
 			continue
 		}
-		if t.Description != ghi.Spec.Description {
-			r.RepoClient.UpdateTicket(GithubTicket{ghi.Spec.Title, ghi.Spec.Description})
+
+		if t.State == "Open" {
+			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+				Type:    "IsOpen",
+				Status:  metav1.ConditionTrue,
+				Reason:  "Issue is Open",
+				Message: "GithubIssue operator detected that the issue is open",
+			})
+		} else {
+			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+				Type:    "IsOpen",
+				Status:  metav1.ConditionFalse,
+				Reason:  "Issue is Closed",
+				Message: "GithubIssue operator detected that the issue is closed",
+			})
+		}
+		if r.RepoClient.IssueHasPR(t) {
+			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+				Type:    "HasPr",
+				Status:  metav1.ConditionTrue,
+				Reason:  "Issue has a PR",
+				Message: "GithubIssue operator detected a PR linked to this issue",
+			})
+		} else {
+			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+				Type:    "HasPr",
+				Status:  metav1.ConditionFalse,
+				Reason:  "Issue does not have a PR",
+				Message: "GithubIssue operator detected no PR linked to this issue",
+			})
+		}
+
+		if t.Description != gi.Spec.Description {
+			t.Description = gi.Spec.Description
+			r.RepoClient.UpdateTicket(t)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil
 	}
-	r.RepoClient.CreateTicket(GithubTicket{ghi.Spec.Title, ghi.Spec.Description})
+	r.RepoClient.CreateTicket(GithubTicket{gi.Spec.Title, gi.Spec.Description, "Open"})
 	return ctrl.Result{}, nil
 }
 

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/clobrano/githubissues-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -48,15 +49,16 @@ var _ = Describe("GithubissueController", func() {
 	Context("Reconciliation", func() {
 		var (
 			underTest *v1alpha1.GithubIssue
-			client    client.WithWatch
+			myClient  client.WithWatch
 			sch       *runtime.Scheme
 		)
+
 		BeforeEach(func() {
 			underTest = newGithubIssue("first issue", "issue has been assigned")
 			objs := []runtime.Object{underTest}
 			sch = scheme.Scheme
 			sch.AddKnownTypes(v1alpha1.SchemeBuilder.GroupVersion, underTest)
-			client = fake.NewFakeClient(objs...)
+			myClient = fake.NewFakeClient(objs...)
 		})
 
 		When("the issue does not exist", func() {
@@ -64,7 +66,7 @@ var _ = Describe("GithubissueController", func() {
 			Expect(gclient.SpyTicket).To(BeNil())
 
 			It("it should create it", func() {
-				r := &GithubIssueReconciler{client, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -81,14 +83,13 @@ var _ = Describe("GithubissueController", func() {
 
 		When("the issue exists without the expected description", func() {
 			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first big issue"},
-				{"second issue", "second issue description"},
+				{"first issue", "first issue description", "Open"},
 			})
 			// The first issue in the mock-ed repository is expected to be modified
 			gclient.SpyTicket = &gclient.Tickets[0]
 
 			It("it should update the ticket description", func() {
-				r := &GithubIssueReconciler{client, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -102,9 +103,102 @@ var _ = Describe("GithubissueController", func() {
 			})
 		})
 
-		When("the issue has a PR", func() {
-			It("status should be updated", func() {
+		When("the issue is Open", func() {
+			gclient := newGithubFakeClient([]GithubTicket{
+				{"first issue", "first issue has a PR", "Open"},
+			})
+			gclient.SpyTicket = &gclient.Tickets[0]
 
+			It("it should set corresponding Open condition", func() {
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				req := reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      "test",
+						Namespace: "default",
+					},
+				}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(underTest.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", "IsOpen"),
+						HaveField("Status", metav1.ConditionTrue),
+					)))
+			})
+		})
+
+		When("the issue is Closed", func() {
+			gclient := newGithubFakeClient([]GithubTicket{
+				{"first issue", "first issue", "Closed"},
+			})
+			gclient.SpyTicket = &gclient.Tickets[0]
+
+			It("it should set corresponding Closed condition", func() {
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				req := reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      "test",
+						Namespace: "default",
+					},
+				}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(underTest.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", "IsOpen"),
+						HaveField("Status", metav1.ConditionFalse),
+					)))
+			})
+		})
+
+		When("the issue has a PR", func() {
+			gclient := newGithubFakeClient([]GithubTicket{
+				{"first issue", "first issue has a PR", "Open"},
+			})
+			gclient.SpyTicket = &gclient.Tickets[0]
+
+			It("it should set corresponding HasPr condition", func() {
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				req := reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      "test",
+						Namespace: "default",
+					},
+				}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(underTest.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", "HasPr"),
+						HaveField("Status", metav1.ConditionTrue),
+					)))
+			})
+		})
+		When("the issue has not a PR", func() {
+			gclient := newGithubFakeClient([]GithubTicket{
+				{"first issue", "first issue", "Open"},
+			})
+			gclient.SpyTicket = &gclient.Tickets[0]
+
+			It("it should unset corresponding HasPr condition", func() {
+				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				req := reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      "test",
+						Namespace: "default",
+					},
+				}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(underTest.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", "HasPr"),
+						HaveField("Status", metav1.ConditionFalse),
+					)))
 			})
 		})
 	})
@@ -147,4 +241,9 @@ func (g *GithubFakeClient) UpdateTicket(t GithubTicket) error {
 	g.SpyTicket.Title = t.Title
 	g.SpyTicket.Description = t.Description
 	return nil
+}
+
+func (g GithubFakeClient) IssueHasPR(t GithubTicket) bool {
+	ret := strings.Contains(t.Description, "has a PR")
+	return ret
 }
