@@ -33,6 +33,7 @@ import (
 
 	trainingv1alpha1 "github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers"
+	"github.com/clobrano/githubissues-operator/controllers/gclient"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -90,8 +91,9 @@ func main() {
 	}
 
 	if err = (&controllers.GithubIssueReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RepoClient: &gclient.GClient{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "GithubIssue")
 		os.Exit(1)

@@ -18,34 +18,29 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	trainingv1alpha1 "github.com/clobrano/githubissues-operator/api/v1alpha1"
+	"github.com/clobrano/githubissues-operator/controllers/gclient"
+	corev1 "k8s.io/api/core/v1"
 )
-
-type GithubTicket struct {
-	Title, Description, State string
-}
-
-type GithubClient interface {
-	GetTickets() ([]GithubTicket, error)
-	CreateTicket(GithubTicket) error
-	UpdateTicket(GithubTicket) error
-	IssueHasPR(GithubTicket) bool
-}
 
 // GithubIssueReconciler reconciles a GithubIssue object
 type GithubIssueReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
-	RepoClient GithubClient
+	RepoClient gclient.GithubClient
 }
 
 //+kubebuilder:rbac:groups=training.redhat.com,resources=githubissues,verbs=get;list;watch;create;update;patch;delete
@@ -89,8 +84,13 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}()
 
-	tickets, err := r.RepoClient.GetTickets()
+	err = setGithubTokenEnvFromSecret(r.Client)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	tickets, err := r.RepoClient.GetTickets(gi.Spec.Repo)
+	if err != nil {
+		l.Error(err, "failed to get tickets", "Repo URL", gi.Spec.Repo)
 		return ctrl.Result{}, err
 	}
 
@@ -99,18 +99,18 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			continue
 		}
 
-		if t.State == "Open" {
+		if t.State == "open" {
 			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
 				Type:    "IsOpen",
 				Status:  metav1.ConditionTrue,
-				Reason:  "Issue is Open",
+				Reason:  "IssueIsOpen",
 				Message: "GithubIssue operator detected that the issue is open",
 			})
 		} else {
 			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
 				Type:    "IsOpen",
 				Status:  metav1.ConditionFalse,
-				Reason:  "Issue is Closed",
+				Reason:  "IssueIsClosed",
 				Message: "GithubIssue operator detected that the issue is closed",
 			})
 		}
@@ -118,27 +118,39 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
 				Type:    "HasPr",
 				Status:  metav1.ConditionTrue,
-				Reason:  "Issue has a PR",
+				Reason:  "IssueHasPR",
 				Message: "GithubIssue operator detected a PR linked to this issue",
 			})
 		} else {
 			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
 				Type:    "HasPr",
 				Status:  metav1.ConditionFalse,
-				Reason:  "Issue does not have a PR",
+				Reason:  "IssueDoesNotHavePR",
 				Message: "GithubIssue operator detected no PR linked to this issue",
 			})
 		}
 
-		if t.Description != gi.Spec.Description {
-			t.Description = gi.Spec.Description
+		if t.Body != gi.Spec.Description {
+			t.Body = gi.Spec.Description
 			r.RepoClient.UpdateTicket(t)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil
 	}
-	r.RepoClient.CreateTicket(GithubTicket{gi.Spec.Title, gi.Spec.Description, "Open"})
-	return ctrl.Result{}, nil
+
+	newTicket := gclient.GithubTicket{
+		Number:        0,
+		Title:         gi.Spec.Title,
+		Body:          gi.Spec.Description,
+		State:         "open",
+		RepositoryURL: gi.Spec.Repo,
+	}
+
+	err = r.RepoClient.CreateTicket(newTicket)
+	if err != nil {
+		l.Error(err, "could not create ticket", newTicket)
+	}
+	return ctrl.Result{}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -146,4 +158,19 @@ func (r *GithubIssueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&trainingv1alpha1.GithubIssue{}).
 		Complete(r)
+}
+
+func setGithubTokenEnvFromSecret(client client.Client) error {
+	secret := &corev1.Secret{}
+	err := client.Get(context.TODO(), types.NamespacedName{Namespace: "default", Name: "gh-token-secret"}, secret)
+	if err != nil {
+		return fmt.Errorf("could not get secret: %v", err)
+	}
+	enc := base64.StdEncoding.EncodeToString(secret.Data["GITHUB_TOKEN"])
+	token, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return fmt.Errorf("could not decode secret: %v", err)
+	}
+	os.Setenv("GITHUB_TOKEN", string(token))
+	return nil
 }
