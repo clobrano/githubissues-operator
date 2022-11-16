@@ -1,0 +1,62 @@
+package gclient_test
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+
+	"github.com/clobrano/githubissues-operator/controllers/gclient"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = Describe("Github client", func() {
+	It("can get a list of issues from a repository", func() {
+		expected := `[
+	{"number": 1, "title": "issue 1 title", "description": "issue 1 description", "state": "open"},
+	{"number": 2, "title": "issue 2 title", "description": "issue 2 description", "state": "closed"}
+			]`
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, expected)
+		}))
+		defer ts.Close()
+
+		underTest := gclient.GClient{}
+		tickets, err := underTest.GetTickets(ts.URL)
+		Expect(err).To(BeNil())
+		Expect(len(tickets)).To(Equal(2))
+		Expect(tickets[0].State).To(Equal("open"))
+		Expect(tickets[1].State).To(Equal("closed"))
+	})
+
+	It("can create a new ticket", func() {
+		var newTicketReq gclient.GithubTicket
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			err = json.Unmarshal(body, &newTicketReq)
+			if err != nil {
+				fmt.Println(err)
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer ts.Close()
+
+		underTest := gclient.GClient{}
+
+		err := underTest.CreateTicket(
+			gclient.GithubTicket{0, "new issue title", "new issue description", "open", ts.URL})
+		Expect(err).To(BeNil())
+		Expect(newTicketReq).To(And(
+			HaveField("Title", "new issue title"),
+			HaveField("Body", "new issue description"),
+		))
+	})
+})

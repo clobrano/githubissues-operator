@@ -2,11 +2,15 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/clobrano/githubissues-operator/api/v1alpha1"
+	"github.com/clobrano/githubissues-operator/controllers/gclient"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,6 +53,7 @@ var _ = Describe("GithubissueController", func() {
 	Context("Reconciliation", func() {
 		var (
 			underTest *v1alpha1.GithubIssue
+			secret    *corev1.Secret
 			myClient  client.WithWatch
 			sch       *runtime.Scheme
 		)
@@ -59,10 +64,16 @@ var _ = Describe("GithubissueController", func() {
 			sch = scheme.Scheme
 			sch.AddKnownTypes(v1alpha1.SchemeBuilder.GroupVersion, underTest)
 			myClient = fake.NewFakeClient(objs...)
+			secret = newGithubTokenSecret()
+			myClient.Create(context.Background(), secret)
+		})
+		AfterEach(func() {
+			err := myClient.Delete(context.Background(), secret)
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		When("the issue does not exist", func() {
-			gclient := newGithubFakeClient([]GithubTicket{})
+			gclient := newGithubFakeClient([]gclient.GithubTicket{})
 			Expect(gclient.SpyTicket).To(BeNil())
 
 			It("it should create it", func() {
@@ -77,13 +88,13 @@ var _ = Describe("GithubissueController", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gclient.SpyTicket).ToNot(BeNil())
 				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Description).To(Equal("issue has been assigned"))
+				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
 			})
 		})
 
 		When("the issue exists without the expected description", func() {
-			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first issue description", "Open"},
+			gclient := newGithubFakeClient([]gclient.GithubTicket{
+				{Number: 1, Title: "first issue", Body: "first issue description", State: "open"},
 			})
 			// The first issue in the mock-ed repository is expected to be modified
 			gclient.SpyTicket = &gclient.Tickets[0]
@@ -99,13 +110,13 @@ var _ = Describe("GithubissueController", func() {
 				_, err := r.Reconcile(context.TODO(), req)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Description).To(Equal("issue has been assigned"))
+				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
 			})
 		})
 
 		When("the issue is Open", func() {
-			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first issue has a PR", "Open"},
+			gclient := newGithubFakeClient([]gclient.GithubTicket{
+				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open"},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -129,8 +140,8 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue is Closed", func() {
-			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first issue", "Closed"},
+			gclient := newGithubFakeClient([]gclient.GithubTicket{
+				{Number: 1, Title: "first issue", Body: "first issue", State: "closed"},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -154,8 +165,8 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue has a PR", func() {
-			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first issue has a PR", "Open"},
+			gclient := newGithubFakeClient([]gclient.GithubTicket{
+				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open"},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -178,8 +189,8 @@ var _ = Describe("GithubissueController", func() {
 			})
 		})
 		When("the issue has not a PR", func() {
-			gclient := newGithubFakeClient([]GithubTicket{
-				{"first issue", "first issue", "Open"},
+			gclient := newGithubFakeClient([]gclient.GithubTicket{
+				{Number: 1, Title: "first issue", Body: "first issue", State: "open"},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -204,6 +215,17 @@ var _ = Describe("GithubissueController", func() {
 	})
 })
 
+func newGithubTokenSecret() *corev1.Secret {
+	data := map[string][]byte{
+		"GITHUB_TOKEN": []byte("gitub_fake_token"),
+	}
+	object := metav1.ObjectMeta{Name: "gh-token-secret", Namespace: "default"}
+	secret := &corev1.Secret{Data: data, ObjectMeta: object}
+	out, _ := json.Marshal(secret)
+	fmt.Println(string(out))
+	return secret
+}
+
 func newGithubIssue(title, description string) *v1alpha1.GithubIssue {
 	return &v1alpha1.GithubIssue{
 		ObjectMeta: metav1.ObjectMeta{
@@ -220,30 +242,30 @@ func newGithubIssue(title, description string) *v1alpha1.GithubIssue {
 
 type GithubFakeClient struct {
 	// Tickets mocks a Github repository issue list
-	Tickets   []GithubTicket
-	SpyTicket *GithubTicket
+	Tickets   []gclient.GithubTicket
+	SpyTicket *gclient.GithubTicket
 }
 
-func newGithubFakeClient(tickets []GithubTicket) GithubFakeClient {
+func newGithubFakeClient(tickets []gclient.GithubTicket) GithubFakeClient {
 	return GithubFakeClient{tickets, nil}
 }
 
-func (g *GithubFakeClient) GetTickets() ([]GithubTicket, error) {
+func (g *GithubFakeClient) GetTickets(_ string) ([]gclient.GithubTicket, error) {
 	return g.Tickets, nil
 }
 
-func (g *GithubFakeClient) CreateTicket(t GithubTicket) error {
+func (g *GithubFakeClient) CreateTicket(t gclient.GithubTicket) error {
 	g.SpyTicket = &t
 	return nil
 }
 
-func (g *GithubFakeClient) UpdateTicket(t GithubTicket) error {
+func (g *GithubFakeClient) UpdateTicket(t gclient.GithubTicket) error {
 	g.SpyTicket.Title = t.Title
-	g.SpyTicket.Description = t.Description
+	g.SpyTicket.Body = t.Body
 	return nil
 }
 
-func (g GithubFakeClient) IssueHasPR(t GithubTicket) bool {
-	ret := strings.Contains(t.Description, "has a PR")
+func (g GithubFakeClient) IssueHasPR(t gclient.GithubTicket) bool {
+	ret := strings.Contains(t.Body, "has a PR")
 	return ret
 }
