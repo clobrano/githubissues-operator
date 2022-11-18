@@ -24,7 +24,8 @@ var _ = Describe("Github client", func() {
 		}))
 		defer ts.Close()
 
-		underTest := gclient.GClient{}
+		// Use NewServer URL as BaseURL to prevent sending request to the real Github servers
+		underTest := gclient.GClient{BaseURL: ts.URL}
 		tickets, err := underTest.GetTickets(ts.URL)
 		Expect(err).To(BeNil())
 		Expect(len(tickets)).To(Equal(2))
@@ -49,7 +50,8 @@ var _ = Describe("Github client", func() {
 		}))
 		defer ts.Close()
 
-		underTest := gclient.GClient{}
+		// Use NewServer URL as BaseURL to prevent sending request to the real Github servers
+		underTest := gclient.GClient{BaseURL: ts.URL}
 
 		err := underTest.CreateTicket(
 			gclient.GithubTicket{0, "new issue title", "new issue description", "open", ts.URL})

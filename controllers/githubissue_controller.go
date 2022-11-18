@@ -132,7 +132,10 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if t.Body != gi.Spec.Description {
 			t.Body = gi.Spec.Description
-			r.RepoClient.UpdateTicket(t)
+			err = r.RepoClient.UpdateTicket(t)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("could not update ticket: %v", err)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil

@@ -93,7 +93,7 @@ func main() {
 	if err = (&controllers.GithubIssueReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RepoClient: &gclient.GClient{},
+		RepoClient: &gclient.GClient{BaseURL: gclient.GITHUB_API_BASE_URL},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "GithubIssue")
 		os.Exit(1)

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
+
+const GITHUB_API_BASE_URL string = "https://api.github.com/repos"
 
 type GithubTicket struct {
 	Number        int64  `json:"number"`
@@ -23,15 +26,21 @@ type GithubClient interface {
 	IssueHasPR(GithubTicket) bool
 }
 
-type GClient struct{}
+type GClient struct {
+	BaseURL string
+}
 
-func (g *GClient) GetTickets(url string) ([]GithubTicket, error) {
-	res, err := sendRequest("GET", url+"/issues", nil)
+func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
+	request_url, err := g.getAPIBaseURL(repo)
+	if err != nil {
+		return []GithubTicket{}, err
+	}
+	res, err := sendRequest("GET", request_url+"/issues", nil)
 	if err != nil {
 		return []GithubTicket{}, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return []GithubTicket{}, fmt.Errorf("request returned with wrong code: %v", res.Status)
+		return []GithubTicket{}, fmt.Errorf("request to %s returned with wrong code: %v", request_url, res.Status)
 	}
 	defer res.Body.Close()
 
@@ -57,7 +66,7 @@ func (g *GClient) CreateTicket(t GithubTicket) error {
 		return err
 	}
 	if res.StatusCode != http.StatusCreated {
-		return fmt.Errorf("request returned with wrong code: %v", res.Status)
+		return fmt.Errorf("request to %s returned with wrong code: %v", t.RepositoryURL, res.Status)
 	}
 	return err
 }
@@ -71,19 +80,28 @@ func (g *GClient) UpdateTicket(t GithubTicket) error {
 		return err
 	}
 
-	url := fmt.Sprintf("%s/issues/%d", t.RepositoryURL, t.Number)
-	res, err := sendRequest("POST", url, requestBody)
+	request_url := fmt.Sprintf("%s/issues/%d", t.RepositoryURL, t.Number)
+	res, err := sendRequest("POST", request_url, requestBody)
 	if err != nil {
 		return err
 	}
-	if res.StatusCode != http.StatusCreated {
-		return fmt.Errorf("request returned with wrong code: %v", res.Status)
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("request to %s returned with wrong code: %v", request_url, res.Status)
 	}
 	return err
 }
 
 func (g *GClient) IssueHasPR(_ GithubTicket) bool {
 	return false // TODO: Implement
+}
+
+func (g *GClient) getAPIBaseURL(repo string) (string, error) {
+	output, err := url.Parse(repo)
+	if err != nil {
+		return "", fmt.Errorf("could not recognize repository URL: %v\n", err)
+	}
+	// output.Path has format "/OWNER/REPOSITORY", do not add another "/" between BaseURL and output.Path
+	return fmt.Sprintf("%s%s", g.BaseURL, output.Path), nil
 }
 
 func sendRequest(method, url string, data []byte) (*http.Response, error) {
@@ -97,7 +115,7 @@ func sendRequest(method, url string, data []byte) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("GITHUB_TOKEN"))
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("issues request failed: %s", err)
+		return nil, fmt.Errorf("issues request to %s failed: %s", url, err)
 	}
 	return res, nil
 }
