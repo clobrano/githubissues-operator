@@ -35,7 +35,7 @@ func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
 	if err != nil {
 		return []GithubTicket{}, err
 	}
-	res, err := sendRequest("GET", request_url+"/issues", nil)
+	res, err := sendRequest("GET", request_url+"/issues?state=all", nil)
 	if err != nil {
 		return []GithubTicket{}, err
 	}
