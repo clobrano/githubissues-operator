@@ -94,6 +94,23 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	if len(tickets) == 0 {
+		newTicket := gclient.GithubTicket{
+			Number:        0,
+			Title:         gi.Spec.Title,
+			Body:          gi.Spec.Description,
+			State:         "open",
+			RepositoryURL: gi.Spec.Repo,
+		}
+
+		err = r.RepoClient.CreateTicket(newTicket)
+		if err != nil {
+			l.Error(err, "could not create ticket", newTicket)
+		}
+		l.Info("Reconcile", "Created new ticket", newTicket)
+		return ctrl.Result{}, nil
+	}
+
 	for _, t := range tickets {
 		if t.Title != gi.Spec.Title {
 			continue
@@ -136,24 +153,11 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("could not update ticket: %v", err)
 			}
-			return ctrl.Result{}, nil
+			l.Info("Reconcile", "Updated ticket", t.Number)
 		}
-		return ctrl.Result{}, nil
 	}
 
-	newTicket := gclient.GithubTicket{
-		Number:        0,
-		Title:         gi.Spec.Title,
-		Body:          gi.Spec.Description,
-		State:         "open",
-		RepositoryURL: gi.Spec.Repo,
-	}
-
-	err = r.RepoClient.CreateTicket(newTicket)
-	if err != nil {
-		l.Error(err, "could not create ticket", newTicket)
-	}
-	return ctrl.Result{}, err
+	return ctrl.Result{Requeue: true}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
