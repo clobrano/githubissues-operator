@@ -39,8 +39,8 @@ spec:
                 description: Description is the description of the issue to track
                 type: string
               repo:
-                description: 'Important: Run "make" to regenerate code after modifying
-                  this file Repo is the URL of the repository'
+                description: Repo is the URL of the repository
+                pattern: ^https://github.com/[a-z-A-Z0-9-_]+/[a-z-A-Z0-9-_]+$
                 type: string
               title:
                 description: Title is the title of the issue to track

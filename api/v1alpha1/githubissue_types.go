@@ -25,12 +25,15 @@ import (
 
 // GithubIssueSpec defines the desired state of GithubIssue
 type GithubIssueSpec struct {
-	// Important: Run "make" to regenerate code after modifying this file
 	// Repo is the URL of the repository
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https://github.com/[a-z-A-Z0-9-_]+/[a-z-A-Z0-9-_]+$`
 	Repo string `json:"repo"`
 	// Title is the title of the issue to track
+	// +kubebuilder:validation:Required
 	Title string `json:"title"`
 	// Description is the description of the issue to track
+	// +kubebuilder:validation:Required
 	Description string `json:"description"`
 }
 
