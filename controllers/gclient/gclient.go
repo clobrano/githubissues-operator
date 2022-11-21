@@ -111,8 +111,12 @@ func sendRequest(method, url string, data []byte) (*http.Response, error) {
 		return nil, err
 	}
 
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		return nil, fmt.Errorf("could not get github token")
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("GITHUB_TOKEN"))
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("issues request to %s failed: %s", url, err)

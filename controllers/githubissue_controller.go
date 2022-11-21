@@ -18,22 +18,19 @@ package controllers
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	trainingv1alpha1 "github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // GithubIssueReconciler reconciles a GithubIssue object
@@ -84,10 +81,6 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}()
 
-	err = setGithubTokenEnvFromSecret(r.Client)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 	tickets, err := r.RepoClient.GetTickets(gi.Spec.Repo)
 	if err != nil {
 		l.Error(err, "failed to get tickets", "Repo URL", gi.Spec.Repo)
@@ -165,19 +158,4 @@ func (r *GithubIssueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&trainingv1alpha1.GithubIssue{}).
 		Complete(r)
-}
-
-func setGithubTokenEnvFromSecret(client client.Client) error {
-	secret := &corev1.Secret{}
-	err := client.Get(context.TODO(), types.NamespacedName{Namespace: "default", Name: "gh-token-secret"}, secret)
-	if err != nil {
-		return fmt.Errorf("could not get secret: %v", err)
-	}
-	enc := base64.StdEncoding.EncodeToString(secret.Data["GITHUB_TOKEN"])
-	token, err := base64.StdEncoding.DecodeString(enc)
-	if err != nil {
-		return fmt.Errorf("could not decode secret: %v", err)
-	}
-	os.Setenv("GITHUB_TOKEN", string(token))
-	return nil
 }

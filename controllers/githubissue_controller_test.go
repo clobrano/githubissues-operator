@@ -2,15 +2,13 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"os"
 	"strings"
 
 	"github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,12 +29,14 @@ var _ = Describe("GithubissueController", func() {
 			expected_description = "Op issue title"
 		)
 		BeforeEach(func() {
+			os.Setenv("GITHUB_TOKEN", "fake github token")
 			underTest = newGithubIssue(expected_title, expected_description)
 			err := k8sClient.Create(context.Background(), underTest)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterEach(func() {
+			os.Unsetenv("GITHUB_TOKEN")
 			err := k8sClient.Delete(context.Background(), underTest)
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -53,23 +53,20 @@ var _ = Describe("GithubissueController", func() {
 	Context("Reconciliation", func() {
 		var (
 			underTest *v1alpha1.GithubIssue
-			secret    *corev1.Secret
 			myClient  client.WithWatch
 			sch       *runtime.Scheme
 		)
 
 		BeforeEach(func() {
+			os.Setenv("GITHUB_TOKEN", "fake github token")
 			underTest = newGithubIssue("first issue", "issue has been assigned")
 			objs := []runtime.Object{underTest}
 			sch = scheme.Scheme
 			sch.AddKnownTypes(v1alpha1.SchemeBuilder.GroupVersion, underTest)
 			myClient = fake.NewFakeClient(objs...)
-			secret = newGithubTokenSecret()
-			myClient.Create(context.Background(), secret)
 		})
 		AfterEach(func() {
-			err := myClient.Delete(context.Background(), secret)
-			Expect(err).NotTo(HaveOccurred())
+			os.Unsetenv("GITHUB_TOKEN")
 		})
 
 		When("the issue does not exist", func() {
@@ -214,17 +211,6 @@ var _ = Describe("GithubissueController", func() {
 		})
 	})
 })
-
-func newGithubTokenSecret() *corev1.Secret {
-	data := map[string][]byte{
-		"GITHUB_TOKEN": []byte("gitub_fake_token"),
-	}
-	object := metav1.ObjectMeta{Name: "gh-token-secret", Namespace: "default"}
-	secret := &corev1.Secret{Data: data, ObjectMeta: object}
-	out, _ := json.Marshal(secret)
-	fmt.Println(string(out))
-	return secret
-}
 
 func newGithubIssue(title, description string) *v1alpha1.GithubIssue {
 	return &v1alpha1.GithubIssue{

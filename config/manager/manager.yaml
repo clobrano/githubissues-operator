@@ -72,6 +72,13 @@ spec:
         - --leader-elect
         image: controller:latest
         name: manager
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: gh-token-secret
+                key: GITHUB_TOKEN
+                optional: false
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

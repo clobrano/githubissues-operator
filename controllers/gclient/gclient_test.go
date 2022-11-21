@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
 
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
 	. "github.com/onsi/ginkgo/v2"
@@ -14,6 +15,8 @@ import (
 
 var _ = Describe("Github client", func() {
 	It("can get a list of issues from a repository", func() {
+		os.Setenv("GITHUB_TOKEN", "fake github token")
+
 		expected := `[
 	{"number": 1, "title": "issue 1 title", "description": "issue 1 description", "state": "open"},
 	{"number": 2, "title": "issue 2 title", "description": "issue 2 description", "state": "closed"}
@@ -31,9 +34,11 @@ var _ = Describe("Github client", func() {
 		Expect(len(tickets)).To(Equal(2))
 		Expect(tickets[0].State).To(Equal("open"))
 		Expect(tickets[1].State).To(Equal("closed"))
+		os.Unsetenv("GITHUB_TOKEN")
 	})
 
 	It("can create a new ticket", func() {
+		os.Setenv("GITHUB_TOKEN", "fake github token")
 		var newTicketReq gclient.GithubTicket
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,5 +65,6 @@ var _ = Describe("Github client", func() {
 			HaveField("Title", "new issue title"),
 			HaveField("Body", "new issue description"),
 		))
+		os.Unsetenv("GITHUB_TOKEN")
 	})
 })
