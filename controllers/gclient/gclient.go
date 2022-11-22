@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 )
 
 const GITHUB_API_BASE_URL string = "https://api.github.com/repos"
@@ -17,6 +19,7 @@ type GithubTicket struct {
 	Body          string `json:"body"`
 	State         string `json:"state"`
 	RepositoryURL string `json:"repository_url"`
+	HasPr         bool   `json:"has_pr"`
 }
 
 type githubIssue struct {
@@ -59,7 +62,8 @@ func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
 		return []GithubTicket{}, fmt.Errorf("can't decode body: %v", err)
 	}
 
-	var tickets []GithubTicket
+	ticketMap := make(map[int]GithubTicket, 1)
+	var ticketsWithPR []int
 	for _, i := range allIssues {
 		if len(i.PullRequest) == 0 {
 			newTicket := GithubTicket{
@@ -68,11 +72,26 @@ func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
 				Body:          i.Body,
 				RepositoryURL: i.RepositoryURL,
 				State:         i.State,
+				HasPr:         false,
 			}
-			tickets = append(tickets, newTicket)
+			ticketMap[int(newTicket.Number)] = newTicket
+		} else {
+			numbers := ExtractReferencedIssue(i.Body)
+			for _, n := range numbers {
+				ticketsWithPR = append(ticketsWithPR, n)
+			}
 		}
 	}
+	for _, number := range ticketsWithPR {
+		cpy := ticketMap[number]
+		cpy.HasPr = true
+		ticketMap[number] = cpy
+	}
 
+	var tickets []GithubTicket
+	for _, ticket := range ticketMap {
+		tickets = append(tickets, ticket)
+	}
 	return tickets, nil
 }
 
@@ -146,4 +165,23 @@ func sendRequest(method, url string, data []byte) (*http.Response, error) {
 		return nil, fmt.Errorf("issues request to %s failed: %s", url, err)
 	}
 	return res, nil
+}
+
+func ExtractReferencedIssue(body string) []int {
+	var numbers []int
+	re := regexp.MustCompile("[close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved]:? #([0-9]+)")
+
+	matches := re.FindAllStringSubmatch(body, -1)
+	for _, parts := range matches {
+		if len(parts) >= 2 {
+			for _, p := range parts[1:] {
+				number, err := strconv.Atoi(p)
+				if err != nil {
+					continue
+				}
+				numbers = append(numbers, number)
+			}
+		}
+	}
+	return numbers
 }
