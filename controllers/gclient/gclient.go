@@ -19,6 +19,15 @@ type GithubTicket struct {
 	RepositoryURL string `json:"repository_url"`
 }
 
+type githubIssue struct {
+	Number        int64             `json:"number"`
+	Title         string            `json:"title"`
+	Body          string            `json:"body"`
+	State         string            `json:"state"`
+	RepositoryURL string            `json:"repository_url"`
+	PullRequest   map[string]string `json:"pull_request"`
+}
+
 type GithubClient interface {
 	GetTickets(string) ([]GithubTicket, error)
 	CreateTicket(GithubTicket) error
@@ -44,11 +53,26 @@ func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
 	}
 	defer res.Body.Close()
 
-	var tickets []GithubTicket
-	err = json.NewDecoder(res.Body).Decode(&tickets)
+	var allIssues []githubIssue
+	err = json.NewDecoder(res.Body).Decode(&allIssues)
 	if err != nil {
 		return []GithubTicket{}, fmt.Errorf("can't decode body: %v", err)
 	}
+
+	var tickets []GithubTicket
+	for _, i := range allIssues {
+		if len(i.PullRequest) == 0 {
+			newTicket := GithubTicket{
+				Number:        i.Number,
+				Title:         i.Title,
+				Body:          i.Body,
+				RepositoryURL: i.RepositoryURL,
+				State:         i.State,
+			}
+			tickets = append(tickets, newTicket)
+		}
+	}
+
 	return tickets, nil
 }
 

@@ -17,23 +17,62 @@ var _ = Describe("Github client", func() {
 	It("can get a list of issues from a repository", func() {
 		os.Setenv("GITHUB_TOKEN", "fake github token")
 
-		expected := `[
-	{"number": 1, "title": "issue 1 title", "description": "issue 1 description", "state": "open"},
-	{"number": 2, "title": "issue 2 title", "description": "issue 2 description", "state": "closed"}
-			]`
+		expected := `
+		[
+			{
+				"number": 1,
+				"title": "issue 1 title",
+				"body": "issue 1 description",
+				"state": "open"
+			},
+			{
+				"number": 2,
+				"title": "issue 2 title",
+				"body": "issue 2 description",
+				"state": "closed"
+			},
+			{
+				"number": 3,
+				"title": "issue 3 title",
+				"body": "issue 3 description",
+				"state": "open"
+			},
+			{
+				"number": 11,
+				"title": "PR to fix issue 3",
+				"body": "this is a PR and shall not count",
+				"state": "open",
+				"pull_request": {
+					"diff_url":"just a field to have non-empty pull_request field"
+				}
+			},
+			{
+				"number": 4,
+				"title": "PR",
+				"body": "this is a PR and shall not count",
+				"state": "open",
+				"pull_request": {
+					"diff_url":"just a field to have non-empty pull_request field"
+				}
+			}
+		]`
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintf(w, expected)
 		}))
 		defer ts.Close()
 
+		wanted := []gclient.GithubTicket{
+			{1, "issue 1 title", "issue 1 description", "open", ""},
+			{2, "issue 2 title", "issue 2 description", "closed", ""},
+			{3, "issue 3 title", "issue 3 description", "open", ""},
+		}
 		// Use NewServer URL as BaseURL to prevent sending request to the real Github servers
 		underTest := gclient.GClient{BaseURL: ts.URL}
 		tickets, err := underTest.GetTickets(ts.URL)
 		Expect(err).To(BeNil())
-		Expect(len(tickets)).To(Equal(2))
-		Expect(tickets[0].State).To(Equal("open"))
-		Expect(tickets[1].State).To(Equal("closed"))
+		Expect(tickets).To(ContainElements(wanted))
+
 		os.Unsetenv("GITHUB_TOKEN")
 	})
 
