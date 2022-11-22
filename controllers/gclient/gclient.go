@@ -134,8 +134,8 @@ func (g *GClient) UpdateTicket(t GithubTicket) error {
 	return err
 }
 
-func (g *GClient) IssueHasPR(_ GithubTicket) bool {
-	return false // TODO: Implement
+func (g *GClient) IssueHasPR(t GithubTicket) bool {
+	return t.HasPr
 }
 
 func (g *GClient) getAPIBaseURL(repo string) (string, error) {

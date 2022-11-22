@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"os"
-	"strings"
 
 	"github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
@@ -163,7 +162,7 @@ var _ = Describe("GithubissueController", func() {
 
 		When("the issue has a PR", func() {
 			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open"},
+				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open", HasPr: true},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -187,7 +186,7 @@ var _ = Describe("GithubissueController", func() {
 		})
 		When("the issue has not a PR", func() {
 			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue", State: "open"},
+				{Number: 1, Title: "first issue", Body: "first issue", State: "open", HasPr: false},
 			})
 			gclient.SpyTicket = &gclient.Tickets[0]
 
@@ -252,6 +251,5 @@ func (g *GithubFakeClient) UpdateTicket(t gclient.GithubTicket) error {
 }
 
 func (g GithubFakeClient) IssueHasPR(t gclient.GithubTicket) bool {
-	ret := strings.Contains(t.Body, "has a PR")
-	return ret
+	return t.HasPr
 }
