@@ -118,6 +118,7 @@ func (g *GClient) UpdateTicket(t GithubTicket) error {
 	requestBody, err := json.Marshal(map[string]string{
 		"title": t.Title,
 		"body":  t.Body,
+		"state": t.State,
 	})
 	if err != nil {
 		return err
