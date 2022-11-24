@@ -105,7 +105,7 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		err = r.RepoClient.CreateTicket(newTicket)
 		if err != nil {
-			l.Error(err, "could not create ticket", newTicket)
+			return ctrl.Result{}, err
 		}
 		l.Info("Reconcile", "Created new ticket", newTicket)
 		return ctrl.Result{}, nil
