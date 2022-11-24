@@ -69,11 +69,11 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue does not exist", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{})
-			Expect(gclient.SpyTicket).To(BeNil())
+			gc := newGithubFakeClient([]gclient.GithubTicket{})
+			Expect(gc.SpyTicket).To(BeNil())
 
 			It("it should create it", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -82,21 +82,21 @@ var _ = Describe("GithubissueController", func() {
 				}
 				_, err := r.Reconcile(context.TODO(), req)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(gclient.SpyTicket).ToNot(BeNil())
-				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
+				Expect(gc.SpyTicket).ToNot(BeNil())
+				Expect(gc.SpyTicket.Title).To(Equal("first issue"))
+				Expect(gc.SpyTicket.Body).To(Equal("issue has been assigned"))
 			})
 		})
 
 		When("the issue exists without the expected description", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
+			gc := newGithubFakeClient([]gclient.GithubTicket{
 				{Number: 1, Title: "first issue", Body: "first issue description", State: "open"},
 			})
 			// The first issue in the mock-ed repository is expected to be modified
-			gclient.SpyTicket = &gclient.Tickets[0]
+			gc.SpyTicket = &gc.Tickets[0]
 
 			It("it should update the ticket description", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -105,19 +105,19 @@ var _ = Describe("GithubissueController", func() {
 				}
 				_, err := r.Reconcile(context.TODO(), req)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
+				Expect(gc.SpyTicket.Title).To(Equal("first issue"))
+				Expect(gc.SpyTicket.Body).To(Equal("issue has been assigned"))
 			})
 		})
 
 		When("the issue is Open", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
+			gc := newGithubFakeClient([]gclient.GithubTicket{
 				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open"},
 			})
-			gclient.SpyTicket = &gclient.Tickets[0]
+			gc.SpyTicket = &gc.Tickets[0]
 
 			It("it should set corresponding Open condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -136,13 +136,13 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue is Closed", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
+			gc := newGithubFakeClient([]gclient.GithubTicket{
 				{Number: 1, Title: "first issue", Body: "first issue", State: "closed"},
 			})
-			gclient.SpyTicket = &gclient.Tickets[0]
+			gc.SpyTicket = &gc.Tickets[0]
 
 			It("it should set corresponding Closed condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -161,13 +161,13 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue has a PR", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
+			gc := newGithubFakeClient([]gclient.GithubTicket{
 				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open", HasPr: true},
 			})
-			gclient.SpyTicket = &gclient.Tickets[0]
+			gc.SpyTicket = &gc.Tickets[0]
 
 			It("it should set corresponding HasPr condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
@@ -185,13 +185,13 @@ var _ = Describe("GithubissueController", func() {
 			})
 		})
 		When("the issue has not a PR", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
+			gc := newGithubFakeClient([]gclient.GithubTicket{
 				{Number: 1, Title: "first issue", Body: "first issue", State: "open", HasPr: false},
 			})
-			gclient.SpyTicket = &gclient.Tickets[0]
+			gc.SpyTicket = &gc.Tickets[0]
 
 			It("it should unset corresponding HasPr condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
+				r := &GithubIssueReconciler{myClient, sch, &gc}
 				req := reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      "test",
