@@ -27,11 +27,14 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	trainingv1alpha1 "github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
 )
+
+const GIFinalizer = "training.redhat.com/gifinalizer"
 
 // GithubIssueReconciler reconciles a GithubIssue object
 type GithubIssueReconciler struct {
@@ -58,16 +61,20 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	gi := &trainingv1alpha1.GithubIssue{}
 	err := r.Get(ctx, req.NamespacedName, gi)
 	if err != nil {
-		l.Error(err, "failed fetching GithubIssue resources", "object", gi)
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 
+		l.Error(err, "failed fetching GithubIssue resources", "object", gi)
 		return ctrl.Result{}, err
 	}
 
+	isGithubIssueMarkedToBeDeleted := !gi.DeletionTimestamp.IsZero()
 	giOrig := gi.DeepCopy()
 	defer func() {
+		if isGithubIssueMarkedToBeDeleted {
+			return
+		}
 		mergeFrom := client.MergeFrom(giOrig)
 		if streamBytes, err := mergeFrom.Data(gi); err != nil {
 			return
@@ -148,9 +155,32 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			l.Info("Reconcile", "Updated ticket", t.Number)
 		}
+
+		if t.State == "open" && isGithubIssueMarkedToBeDeleted {
+			t.State = "closed"
+			err = r.RepoClient.UpdateTicket(t)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("could not close ticket: %v", err)
+			}
+			controllerutil.RemoveFinalizer(gi, GIFinalizer)
+			err = r.Update(ctx, gi)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %v", err)
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
-	return ctrl.Result{Requeue: true}, nil
+	// Add finalizer
+	if !controllerutil.ContainsFinalizer(gi, GIFinalizer) {
+		controllerutil.AddFinalizer(gi, GIFinalizer)
+		err = r.Update(ctx, gi)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
