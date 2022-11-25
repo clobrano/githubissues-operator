@@ -69,6 +69,14 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	if !controllerutil.ContainsFinalizer(gi, GIFinalizer) {
+		controllerutil.AddFinalizer(gi, GIFinalizer)
+		err = r.Update(ctx, gi)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	isGithubIssueMarkedToBeDeleted := !gi.DeletionTimestamp.IsZero()
 	giOrig := gi.DeepCopy()
 	defer func() {
@@ -101,7 +109,24 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			break
 		}
 	}
-	if target == nil && !isGithubIssueMarkedToBeDeleted {
+
+	if isGithubIssueMarkedToBeDeleted {
+		if target != nil && target.State == "open" {
+			target.State = "closed"
+			err = r.RepoClient.UpdateTicket(*target)
+			if err != nil {
+				l.Error(err, "could not close ticket", "Ticket", target)
+			}
+		}
+		controllerutil.RemoveFinalizer(gi, GIFinalizer)
+		err = r.Update(ctx, gi)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %v", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if target == nil {
 		newTicket := gclient.GithubTicket{
 			Number:        0,
 			Title:         gi.Spec.Title,
@@ -157,29 +182,6 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, fmt.Errorf("could not update ticket: %v", err)
 		}
 		l.Info("Reconcile", "Updated ticket", target.Number)
-	}
-
-	if target.State == "open" && isGithubIssueMarkedToBeDeleted {
-		target.State = "closed"
-		err = r.RepoClient.UpdateTicket(*target)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("could not close ticket: %v", err)
-		}
-		controllerutil.RemoveFinalizer(gi, GIFinalizer)
-		err = r.Update(ctx, gi)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %v", err)
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Add finalizer
-	if !controllerutil.ContainsFinalizer(gi, GIFinalizer) {
-		controllerutil.AddFinalizer(gi, GIFinalizer)
-		err = r.Update(ctx, gi)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	return ctrl.Result{}, nil
