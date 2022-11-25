@@ -94,7 +94,14 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if len(tickets) == 0 && !isGithubIssueMarkedToBeDeleted {
+	var target *gclient.GithubTicket
+	for _, t := range tickets {
+		if t.Title == gi.Spec.Title {
+			target = &t
+			break
+		}
+	}
+	if target == nil && !isGithubIssueMarkedToBeDeleted {
 		newTicket := gclient.GithubTicket{
 			Number:        0,
 			Title:         gi.Spec.Title,
@@ -107,66 +114,63 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil
 	}
 
-	for _, t := range tickets {
-		if t.Title != gi.Spec.Title {
-			continue
-		}
-
-		if t.State == "open" {
+	if target.State == "open" {
+		if !isGithubIssueMarkedToBeDeleted {
 			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
 				Type:    "IsOpen",
 				Status:  metav1.ConditionTrue,
 				Reason:  "IssueIsOpen",
 				Message: "GithubIssue operator detected that the issue is open",
 			})
-		} else {
-			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
-				Type:    "IsOpen",
-				Status:  metav1.ConditionFalse,
-				Reason:  "IssueIsClosed",
-				Message: "GithubIssue operator detected that the issue is closed",
-			})
 		}
-		if r.RepoClient.IssueHasPR(t) {
-			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
-				Type:    "HasPr",
-				Status:  metav1.ConditionTrue,
-				Reason:  "IssueHasPR",
-				Message: "GithubIssue operator detected a PR linked to this issue",
-			})
-		} else {
-			meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
-				Type:    "HasPr",
-				Status:  metav1.ConditionFalse,
-				Reason:  "IssueDoesNotHavePR",
-				Message: "GithubIssue operator detected no PR linked to this issue",
-			})
-		}
+	} else {
+		meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+			Type:    "IsOpen",
+			Status:  metav1.ConditionFalse,
+			Reason:  "IssueIsClosed",
+			Message: "GithubIssue operator detected that the issue is closed",
+		})
+	}
+	if r.RepoClient.IssueHasPR(*target) {
+		meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+			Type:    "HasPr",
+			Status:  metav1.ConditionTrue,
+			Reason:  "IssueHasPR",
+			Message: "GithubIssue operator detected a PR linked to this issue",
+		})
+	} else {
+		meta.SetStatusCondition(&gi.Status.Conditions, metav1.Condition{
+			Type:    "HasPr",
+			Status:  metav1.ConditionFalse,
+			Reason:  "IssueDoesNotHavePR",
+			Message: "GithubIssue operator detected no PR linked to this issue",
+		})
+	}
 
-		if t.Body != gi.Spec.Description {
-			t.Body = gi.Spec.Description
-			err = r.RepoClient.UpdateTicket(t)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("could not update ticket: %v", err)
-			}
-			l.Info("Reconcile", "Updated ticket", t.Number)
+	if target.Body != gi.Spec.Description {
+		target.Body = gi.Spec.Description
+		err = r.RepoClient.UpdateTicket(*target)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not update ticket: %v", err)
 		}
+		l.Info("Reconcile", "Updated ticket", target.Number)
+	}
 
-		if t.State == "open" && isGithubIssueMarkedToBeDeleted {
-			t.State = "closed"
-			err = r.RepoClient.UpdateTicket(t)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("could not close ticket: %v", err)
-			}
-			controllerutil.RemoveFinalizer(gi, GIFinalizer)
-			err = r.Update(ctx, gi)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %v", err)
-			}
-			return ctrl.Result{}, nil
+	if target.State == "open" && isGithubIssueMarkedToBeDeleted {
+		target.State = "closed"
+		err = r.RepoClient.UpdateTicket(*target)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not close ticket: %v", err)
 		}
+		controllerutil.RemoveFinalizer(gi, GIFinalizer)
+		err = r.Update(ctx, gi)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %v", err)
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// Add finalizer
