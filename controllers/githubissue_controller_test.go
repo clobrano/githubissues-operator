@@ -95,7 +95,9 @@ var _ = Describe("GithubissueController", func() {
 					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
 				}
 
-				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{}, nil)
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{
+					{Title: "Title different than expected"},
+				}, nil)
 				mgc.EXPECT().CreateTicket(want).Return(nil)
 
 				r := &GithubIssueReconciler{myClient, sch, mgc}

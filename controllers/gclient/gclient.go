@@ -43,16 +43,17 @@ type GClient struct {
 }
 
 func (g *GClient) GetTickets(repo string) ([]GithubTicket, error) {
-	request_url, err := g.getAPIBaseURL(repo)
+	requestUrl, err := g.getAPIBaseURL(repo)
 	if err != nil {
 		return []GithubTicket{}, err
 	}
-	res, err := sendRequest("GET", request_url+"/issues?state=all", nil)
+	requestUrl += "/issues?state=all"
+	res, err := sendRequest("GET", requestUrl, nil)
 	if err != nil {
 		return []GithubTicket{}, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return []GithubTicket{}, fmt.Errorf("request to %s returned with wrong code: %v", request_url, res.Status)
+		return []GithubTicket{}, fmt.Errorf("request %s returned with wrong code: %v", requestUrl, res.Status)
 	}
 	defer res.Body.Close()
 
@@ -104,12 +105,17 @@ func (g *GClient) CreateTicket(t GithubTicket) error {
 		return err
 	}
 
-	res, err := sendRequest("POST", t.RepositoryURL+"/issues", requestBody)
+	requestUrl, err := g.getAPIBaseURL(t.RepositoryURL)
+	if err != nil {
+		return err
+	}
+	requestUrl += "/issues"
+	res, err := sendRequest("POST", requestUrl, requestBody)
 	if err != nil {
 		return err
 	}
 	if res.StatusCode != http.StatusCreated {
-		return fmt.Errorf("request to %s returned with wrong code: %v", t.RepositoryURL, res.Status)
+		return fmt.Errorf("request %s returned with wrong code: %v", requestUrl, res.Status)
 	}
 	return err
 }
@@ -157,7 +163,7 @@ func sendRequest(method, url string, data []byte) (*http.Response, error) {
 
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		return nil, fmt.Errorf("could not get github token")
+		return nil, fmt.Errorf("could not get github token for '%s'", url)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+token)
