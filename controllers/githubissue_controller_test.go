@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"context"
-	"os"
+	"fmt"
 
 	"github.com/clobrano/githubissues-operator/api/v1alpha1"
 	"github.com/clobrano/githubissues-operator/controllers/gclient"
+	"github.com/clobrano/githubissues-operator/controllers/gclient/mock"
+	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -23,110 +26,175 @@ var _ = Describe("GithubissueController", func() {
 	Context("default", func() {
 		var underTest *v1alpha1.GithubIssue
 		var (
-			expected_url         = "https://github.com/clobrano/githubissues-operator"
-			expected_title       = "Op issue title"
-			expected_description = "Op issue title"
+			expectedUrl         = "https://github.com/clobrano/githubissues-operator"
+			expectedTitle       = "Op issue title"
+			expectedDescription = "Op issue title"
 		)
 		BeforeEach(func() {
-			os.Setenv("GITHUB_TOKEN", "fake github token")
-			underTest = newGithubIssue(expected_title, expected_description)
+			underTest = newGithubIssue(expectedTitle, expectedDescription)
 			err := k8sClient.Create(context.Background(), underTest)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterEach(func() {
-			os.Unsetenv("GITHUB_TOKEN")
 			err := k8sClient.Delete(context.Background(), underTest)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		When("creating a resource", func() {
 			It("it should have the expected values set", func() {
-				Expect(underTest.Spec.Repo).To(Equal(expected_url))
-				Expect(underTest.Spec.Title).To(Equal(expected_title))
-				Expect(underTest.Spec.Description).To(Equal(expected_description))
+				Expect(underTest.Spec.Repo).To(Equal(expectedUrl))
+				Expect(underTest.Spec.Title).To(Equal(expectedTitle))
+				Expect(underTest.Spec.Description).To(Equal(expectedDescription))
 			})
 		})
 	})
 
 	Context("Reconciliation", func() {
 		var (
-			underTest *v1alpha1.GithubIssue
-			myClient  client.WithWatch
-			sch       *runtime.Scheme
+			underTest                *v1alpha1.GithubIssue
+			myClient                 client.WithWatch
+			sch                      *runtime.Scheme
+			req                      reconcile.Request
+			mctrl                    *gomock.Controller
+			mgc                      *mock.MockGithubClient
+			expectedIssueTitle       = "Title of the issue"
+			expectedIssueDescription = "some text describing the issue"
 		)
 
 		BeforeEach(func() {
-			os.Setenv("GITHUB_TOKEN", "fake github token")
-			underTest = newGithubIssue("first issue", "issue has been assigned")
-			objs := []runtime.Object{underTest}
+			underTest = newGithubIssue(expectedIssueTitle, expectedIssueDescription)
+
 			sch = scheme.Scheme
 			sch.AddKnownTypes(v1alpha1.SchemeBuilder.GroupVersion, underTest)
+
+			objs := []runtime.Object{underTest}
 			myClient = fake.NewFakeClient(objs...)
+
+			req = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test",
+					Namespace: "default",
+				},
+			}
+
+			mctrl = gomock.NewController(GinkgoT())
+			mgc = mock.NewMockGithubClient(mctrl)
 		})
+
 		AfterEach(func() {
-			os.Unsetenv("GITHUB_TOKEN")
+			mctrl.Finish()
 		})
 
 		When("the issue does not exist", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{})
-			Expect(gclient.SpyTicket).To(BeNil())
-
-			It("it should create it", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+			It("should create it", func() {
+				want := gclient.GithubTicket{
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
 				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{}, nil)
+				mgc.EXPECT().CreateTicket(want).Return(nil)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(gclient.SpyTicket).ToNot(BeNil())
-				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should return with error if it cannot create it", func() {
+				want := gclient.GithubTicket{
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{}, nil)
+				mgc.EXPECT().CreateTicket(want).Return(fmt.Errorf("could not send Github API request"))
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).To(HaveOccurred())
 			})
 		})
 
 		When("the issue exists without the expected description", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue description", State: "open"},
-			})
-			// The first issue in the mock-ed repository is expected to be modified
-			gclient.SpyTicket = &gclient.Tickets[0]
-
-			It("it should update the ticket description", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+			It("should update the ticket description only", func() {
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          "a different issue description",
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
 				}
+				want := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket)
+				mgc.EXPECT().UpdateTicket(want).Return(nil)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(gclient.SpyTicket.Title).To(Equal("first issue"))
-				Expect(gclient.SpyTicket.Body).To(Equal("issue has been assigned"))
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should return an error if it cannot update the ticket description", func() {
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          "a different issue description",
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
+				}
+				want := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket)
+				mgc.EXPECT().UpdateTicket(want).Return(fmt.Errorf("could not send github API request"))
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).To(HaveOccurred())
 			})
 		})
 
-		When("the issue is Open", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open"},
-			})
-			gclient.SpyTicket = &gclient.Tickets[0]
-
-			It("it should set corresponding Open condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+		When("the issue is open", func() {
+			It("it should set corresponding open condition", func() {
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
 				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
-				Expect(err).NotTo(HaveOccurred())
 				Expect(underTest.Status.Conditions).To(ContainElement(
 					And(
 						HaveField("Type", "IsOpen"),
@@ -135,23 +203,25 @@ var _ = Describe("GithubissueController", func() {
 			})
 		})
 
-		When("the issue is Closed", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue", State: "closed"},
-			})
-			gclient.SpyTicket = &gclient.Tickets[0]
-
-			It("it should set corresponding Closed condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+		When("the issue is closed", func() {
+			It("it should set corresponding closed condition", func() {
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "closed",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
 				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
-				Expect(err).NotTo(HaveOccurred())
 				Expect(underTest.Status.Conditions).To(ContainElement(
 					And(
 						HaveField("Type", "IsOpen"),
@@ -161,22 +231,23 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue has a PR", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue has a PR", State: "open", HasPr: true},
-			})
-			gclient.SpyTicket = &gclient.Tickets[0]
-
 			It("it should set corresponding HasPr condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
 				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket).Return(true)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
-				Expect(err).NotTo(HaveOccurred())
 				Expect(underTest.Status.Conditions).To(ContainElement(
 					And(
 						HaveField("Type", "HasPr"),
@@ -184,28 +255,106 @@ var _ = Describe("GithubissueController", func() {
 					)))
 			})
 		})
-		When("the issue has not a PR", func() {
-			gclient := newGithubFakeClient([]gclient.GithubTicket{
-				{Number: 1, Title: "first issue", Body: "first issue", State: "open", HasPr: false},
-			})
-			gclient.SpyTicket = &gclient.Tickets[0]
 
+		When("the issue has no PR", func() {
 			It("it should unset corresponding HasPr condition", func() {
-				r := &GithubIssueReconciler{myClient, sch, &gclient}
-				req := reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      "test",
-						Namespace: "default",
-					},
+				currentTicket := gclient.GithubTicket{
+					Number:        1,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
 				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicket).Return(false)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
-				Expect(err).NotTo(HaveOccurred())
 				Expect(underTest.Status.Conditions).To(ContainElement(
 					And(
 						HaveField("Type", "HasPr"),
 						HaveField("Status", metav1.ConditionFalse),
 					)))
+			})
+		})
+	})
+
+	Context("Resource deletion", func() {
+		var (
+			underTest                *v1alpha1.GithubIssue
+			myClient                 client.WithWatch
+			sch                      *runtime.Scheme
+			req                      reconcile.Request
+			mctrl                    *gomock.Controller
+			mgc                      *mock.MockGithubClient
+			expectedIssueTitle       = "Title of the issue"
+			expectedIssueDescription = "some text describing the issue"
+		)
+
+		BeforeEach(func() {
+			underTest = newGithubIssue(expectedIssueTitle, expectedIssueDescription)
+
+			sch = scheme.Scheme
+			sch.AddKnownTypes(v1alpha1.SchemeBuilder.GroupVersion, underTest)
+
+			objs := []runtime.Object{underTest}
+			myClient = fake.NewFakeClient(objs...)
+
+			req = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test",
+					Namespace: "default",
+				},
+			}
+
+			mctrl = gomock.NewController(GinkgoT())
+			mgc = mock.NewMockGithubClient(mctrl)
+		})
+
+		AfterEach(func() {
+			mctrl.Finish()
+		})
+
+		When("a ticket maching the CR Spec exists and it is open", func() {
+			It("shall be closed", func() {
+				ctx := context.Background()
+
+				myClient.Create(ctx, underTest)
+
+				r := &GithubIssueReconciler{myClient, sch, mgc}
+				ticket := gclient.GithubTicket{
+					Number:        0,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+				}
+				sameTicketButClosed := gclient.GithubTicket{
+					Number:        0,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "closed",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{ticket}, nil).AnyTimes()
+				mgc.EXPECT().IssueHasPR(ticket).Return(false).AnyTimes()
+
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(controllerutil.ContainsFinalizer(underTest, GIFinalizer)).To(BeTrue())
+
+				mgc.EXPECT().UpdateTicket(sameTicketButClosed)
+				myClient.Delete(ctx, underTest)
+
+				_, err = r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
 			})
 		})
 	})
@@ -223,33 +372,4 @@ func newGithubIssue(title, description string) *v1alpha1.GithubIssue {
 			Description: description,
 		},
 	}
-}
-
-type GithubFakeClient struct {
-	// Tickets mocks a Github repository issue list
-	Tickets   []gclient.GithubTicket
-	SpyTicket *gclient.GithubTicket
-}
-
-func newGithubFakeClient(tickets []gclient.GithubTicket) GithubFakeClient {
-	return GithubFakeClient{tickets, nil}
-}
-
-func (g *GithubFakeClient) GetTickets(_ string) ([]gclient.GithubTicket, error) {
-	return g.Tickets, nil
-}
-
-func (g *GithubFakeClient) CreateTicket(t gclient.GithubTicket) error {
-	g.SpyTicket = &t
-	return nil
-}
-
-func (g *GithubFakeClient) UpdateTicket(t gclient.GithubTicket) error {
-	g.SpyTicket.Title = t.Title
-	g.SpyTicket.Body = t.Body
-	return nil
-}
-
-func (g GithubFakeClient) IssueHasPR(t gclient.GithubTicket) bool {
-	return t.HasPr
 }
