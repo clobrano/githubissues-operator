@@ -94,7 +94,7 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if len(tickets) == 0 {
+	if len(tickets) == 0 && !isGithubIssueMarkedToBeDeleted {
 		newTicket := gclient.GithubTicket{
 			Number:        0,
 			Title:         gi.Spec.Title,
@@ -107,8 +107,6 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		l.Info("Reconcile", "Created new ticket", newTicket)
-		return ctrl.Result{}, nil
 	}
 
 	for _, t := range tickets {
