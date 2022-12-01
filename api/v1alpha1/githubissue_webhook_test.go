@@ -36,15 +36,52 @@ var _ = Describe("Githubissues Validation", func() {
 			})
 		})
 	})
+
+	Context("update Githubissues CR", func() {
+		When("update immutable fields", func() {
+			It("should be rejected", func() {
+				ut := newGithubIssue()
+
+				utCopy := ut.DeepCopy()
+				utCopy.Spec.Repo = "Changed repo string"
+				err := ut.ValidateUpdate(utCopy)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal("could not update: Repo field is immutable"))
+
+				utCopy = ut.DeepCopy()
+				utCopy.Spec.Title = "Changed title"
+				err = ut.ValidateUpdate(utCopy)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal("could not update: Title field is immutable"))
+
+				utCopy = ut.DeepCopy()
+				utCopy.Spec.Repo = "Changed repo string"
+				utCopy.Spec.Title = "Changed title"
+				err = ut.ValidateUpdate(utCopy)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal(
+					"could not update: Repo field is immutable" +
+						"\n" +
+						"could not update: Title field is immutable"))
+			})
+		})
+	})
 })
 
-func newGithubIssueWithRepo(repo string) *GithubIssue {
+func newGithubIssue() *GithubIssue {
 	ut := &GithubIssue{}
 	ut.Name = "test"
 	ut.Namespace = "default"
-	ut.Spec.Repo = repo
+	ut.Spec.Repo = "https://github.com/fake/repository"
 	ut.Spec.Title = "Ticket title"
 	ut.Spec.Description = "Ticket description"
 
+	return ut
+
+}
+
+func newGithubIssueWithRepo(repo string) *GithubIssue {
+	ut := newGithubIssue()
+	ut.Spec.Repo = repo
 	return ut
 }

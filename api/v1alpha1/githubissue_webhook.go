@@ -63,8 +63,23 @@ func (r *GithubIssue) ValidateCreate() error {
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *GithubIssue) ValidateUpdate(old runtime.Object) error {
 	githubissuelog.Info("validate update", "name", r.Name)
+	errMsg := ""
 
-	// TODO(user): fill in your validation logic upon object update.
+	oldGithubissue := old.(*GithubIssue)
+	if oldGithubissue.Spec.Repo != r.Spec.Repo {
+		errMsg += "could not update: Repo field is immutable"
+	}
+	if oldGithubissue.Spec.Title != r.Spec.Title {
+		if errMsg != "" {
+			errMsg += "\n"
+		}
+		errMsg += "could not update: Title field is immutable"
+	}
+
+	if errMsg != "" {
+		return fmt.Errorf(errMsg)
+	}
+
 	return nil
 }
 
