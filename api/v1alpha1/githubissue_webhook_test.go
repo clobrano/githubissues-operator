@@ -1,8 +1,7 @@
 package v1alpha1
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"context"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -12,25 +11,15 @@ var _ = Describe("Githubissues Validation", func() {
 	Context("creating Githubissues CR", func() {
 		When("the repository is unreachable", func() {
 			It("should be rejected", func() {
-				unreachableSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusNotFound)
-				}))
-				defer unreachableSrv.Close()
-
-				ut := newGithubIssueWithRepo(unreachableSrv.URL)
+				ut := newGithubIssueWithRepo("https://github.com/unreachable/repository")
 				err := ut.ValidateCreate()
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Repo " + ut.Spec.Repo + " is unreachable"))
 			})
 		})
 		When("the repository is reachable", func() {
-			It("should be rejected", func() {
-				reachableSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusOK)
-				}))
-				defer reachableSrv.Close()
-
-				ut := newGithubIssueWithRepo(reachableSrv.URL)
+			It("should be accepted", func() {
+				ut := newGithubIssue()
 				err := ut.ValidateCreate()
 				Expect(err).ToNot(HaveOccurred())
 			})
@@ -70,9 +59,9 @@ var _ = Describe("Githubissues Validation", func() {
 
 func newGithubIssue() *GithubIssue {
 	ut := &GithubIssue{}
-	ut.Name = "test"
+	ut.Name = "githubissues-sample"
 	ut.Namespace = "default"
-	ut.Spec.Repo = "https://github.com/fake/repository"
+	ut.Spec.Repo = "https://github.com/clobrano/githubissues-operator"
 	ut.Spec.Title = "Ticket title"
 	ut.Spec.Description = "Ticket description"
 
