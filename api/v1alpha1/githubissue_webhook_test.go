@@ -24,6 +24,15 @@ var _ = Describe("Githubissues Validation", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
+		When("another CR with same Repo and Title exists", func() {
+			It("should be rejected", func() {
+				original := newGithubIssue()
+				ut := newGithubIssue()
+				ut.Name += "-copy"
+				Expect(k8sClient.Create(context.Background(), original)).To(Succeed())
+				Expect(k8sClient.Create(context.Background(), ut)).ToNot(Succeed())
+			})
+		})
 	})
 
 	Context("update Githubissues CR", func() {

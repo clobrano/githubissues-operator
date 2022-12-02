@@ -17,11 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
@@ -29,13 +31,25 @@ import (
 // log is for logging in this package.
 var githubissuelog = logf.Log.WithName("githubissue-resource")
 
+// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+
+// GithubIssueValidator validates GithubIssue resources. Needed because we need a client for validation
+// +k8s:deepcopy-gen=false
+type GithubIssueValidator struct {
+	client client.Client
+}
+
+var validator *GithubIssueValidator
+
 func (r *GithubIssue) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	validator = &GithubIssueValidator{
+		client: mgr.GetClient(),
+	}
+
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(r).
 		Complete()
 }
-
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
 //+kubebuilder:webhook:path=/mutate-training-redhat-com-v1alpha1-githubissue,mutating=true,failurePolicy=fail,sideEffects=None,groups=training.redhat.com,resources=githubissues,verbs=create;update,versions=v1alpha1,name=mgithubissue.kb.io,admissionReviewVersions=v1
 
@@ -56,6 +70,9 @@ var _ webhook.Validator = &GithubIssue{}
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *GithubIssue) ValidateCreate() error {
 	githubissuelog.Info("validate create", "name", r.Name)
+	if err := r.validateDuplicates(); err != nil {
+		return err
+	}
 
 	return r.validateRepo()
 }
@@ -96,5 +113,21 @@ func (r *GithubIssue) validateRepo() error {
 		githubissuelog.Info("Repo URL validation", "err", err, "Status", rsp.Status)
 		return fmt.Errorf("Repo %v is unreachable", r.Spec.Repo)
 	}
+	return nil
+}
+
+func (r *GithubIssue) validateDuplicates() error {
+	var objects GithubIssueList
+	if err := validator.client.List(context.TODO(), &objects, &client.ListOptions{}); err != nil {
+		return err
+	}
+
+	for _, o := range objects.Items {
+		if r.Spec.Repo == o.Spec.Repo &&
+			r.Spec.Title == o.Spec.Title {
+			return fmt.Errorf("Duplicate resource")
+		}
+	}
+
 	return nil
 }
