@@ -99,6 +99,8 @@ var _ = Describe("GithubissueController", func() {
 					{Title: "Title different than expected"},
 				}, nil)
 				mgc.EXPECT().CreateTicket(want).Return(nil)
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{want}, nil)
+				mgc.EXPECT().IssueHasPR(want).Return(false)
 
 				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
@@ -123,9 +125,9 @@ var _ = Describe("GithubissueController", func() {
 		})
 
 		When("the issue exists without the expected description", func() {
-			It("should update the ticket description only", func() {
-				currentTicket := gclient.GithubTicket{
-					Number:        1,
+			It("should update the ticket description", func() {
+				currentTicketHasWrongDescription := gclient.GithubTicket{
+					Number:        123,
 					Title:         expectedIssueTitle,
 					Body:          "a different issue description",
 					State:         "open",
@@ -133,7 +135,7 @@ var _ = Describe("GithubissueController", func() {
 					HasPr:         false,
 				}
 				want := gclient.GithubTicket{
-					Number:        1,
+					Number:        123,
 					Title:         expectedIssueTitle,
 					Body:          expectedIssueDescription,
 					State:         "open",
@@ -141,15 +143,14 @@ var _ = Describe("GithubissueController", func() {
 					HasPr:         false,
 				}
 
-				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicket}, nil)
-				mgc.EXPECT().IssueHasPR(currentTicket)
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicketHasWrongDescription}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicketHasWrongDescription)
 				mgc.EXPECT().UpdateTicket(want).Return(nil)
 
 				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
 				Expect(err).ToNot(HaveOccurred())
 			})
-
 			It("should return an error if it cannot update the ticket description", func() {
 				currentTicket := gclient.GithubTicket{
 					Number:        1,
@@ -175,6 +176,44 @@ var _ = Describe("GithubissueController", func() {
 				r := &GithubIssueReconciler{myClient, sch, mgc}
 				_, err := r.Reconcile(context.TODO(), req)
 				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("the issue is linked and the title change in Github", func() {
+			It("should not create a new ticket", func() {
+				currentTicketIsUpToDate := gclient.GithubTicket{
+					Number:        123,
+					Title:         expectedIssueTitle,
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicketIsUpToDate}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicketIsUpToDate)
+				r := &GithubIssueReconciler{myClient, sch, mgc}
+				// Here the ticket is linked with the resource
+				_, err := r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(myClient.Get(context.Background(), client.ObjectKeyFromObject(underTest), underTest)).To(Succeed())
+				Expect(underTest.Status.TrackedIssueId).To(Equal(currentTicketIsUpToDate.Number))
+
+				currentTicketWasChanged := gclient.GithubTicket{
+					Number:        123,
+					Title:         "Title has changed",
+					Body:          expectedIssueDescription,
+					State:         "open",
+					RepositoryURL: "https://github.com/clobrano/githubissues-operator",
+					HasPr:         false,
+				}
+
+				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicketWasChanged}, nil)
+				mgc.EXPECT().IssueHasPR(currentTicketWasChanged)
+				// Do not expect update, since only the title was changed
+				r = &GithubIssueReconciler{myClient, sch, mgc}
+				_, err = r.Reconcile(context.TODO(), req)
+				Expect(err).ToNot(HaveOccurred())
 			})
 		})
 

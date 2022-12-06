@@ -121,6 +121,13 @@ spec:
                   - type
                   type: object
                 type: array
+              tracked_issue_id:
+                default: 0
+                description: TrackedIssueId is the linked ticket number
+                format: int64
+                type: integer
+            required:
+            - tracked_issue_id
             type: object
         type: object
     served: true
