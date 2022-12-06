@@ -210,7 +210,9 @@ var _ = Describe("GithubissueController", func() {
 
 				mgc.EXPECT().GetTickets(underTest.Spec.Repo).Return([]gclient.GithubTicket{currentTicketWasChanged}, nil)
 				mgc.EXPECT().IssueHasPR(currentTicketWasChanged)
-				// Do not expect update, since only the title was changed
+				// Expecting the ticket's title to be reverted back to Spec
+				currentTicketWasChanged.Title = expectedIssueTitle
+				mgc.EXPECT().UpdateTicket(currentTicketWasChanged).Return(nil)
 				r = &GithubIssueReconciler{myClient, sch, mgc}
 				_, err = r.Reconcile(context.TODO(), req)
 				Expect(err).ToNot(HaveOccurred())

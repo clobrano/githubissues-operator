@@ -183,7 +183,8 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		})
 	}
 
-	if target.Body != gi.Spec.Description {
+	if target.Title != gi.Spec.Title || target.Body != gi.Spec.Description {
+		target.Title = gi.Spec.Title
 		target.Body = gi.Spec.Description
 		err = r.RepoClient.UpdateTicket(*target)
 		if err != nil {
