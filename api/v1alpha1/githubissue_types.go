@@ -40,6 +40,10 @@ type GithubIssueSpec struct {
 // GithubIssueStatus defines the observed state of GithubIssue
 type GithubIssueStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// TrackedIssueId is the linked ticket number
+	// +kubebuilder:default:=0
+	TrackedIssueId int64 `json:"tracked_issue_id"`
 }
 
 //+kubebuilder:object:root=true
