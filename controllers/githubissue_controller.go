@@ -97,18 +97,10 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}()
 
-	tickets, err := r.RepoClient.GetTickets(gi.Spec.Repo)
+	target, err := r.getMatchingTarget(gi.Status.TrackedIssueId, gi.Spec.Repo, gi.Spec.Title)
 	if err != nil {
-		l.Error(err, "failed to get tickets", "Repo URL", gi.Spec.Repo)
+		l.Error(err, "could not get matching ticket", "Repo URL", gi.Spec.Repo)
 		return ctrl.Result{}, err
-	}
-
-	var target *gclient.GithubTicket
-	for _, t := range tickets {
-		if t.Title == gi.Spec.Title {
-			target = &t
-			break
-		}
 	}
 
 	if isGithubIssueMarkedToBeDeleted {
@@ -140,7 +132,22 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// immediately get the newly created ticket for linkage with Status.Number
+		target, err = r.getMatchingTarget(gi.Status.TrackedIssueId, gi.Spec.Repo, gi.Spec.Title)
+		if err != nil {
+			l.Error(err, "could not get matching ticket", "Repo URL", gi.Spec.Repo)
+			return ctrl.Result{}, err
+		}
+	}
+
+	if gi.Status.TrackedIssueId == 0 {
+		gi.Status.TrackedIssueId = target.Number
+		err := r.Client.Status().Update(ctx, gi)
+		if err != nil {
+			l.Error(err, "could not update Status.Number", "Target", target)
+			return ctrl.Result{}, err
+		}
 	}
 
 	if target.State == "open" {
@@ -176,7 +183,8 @@ func (r *GithubIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		})
 	}
 
-	if target.Body != gi.Spec.Description {
+	if target.Title != gi.Spec.Title || target.Body != gi.Spec.Description {
+		target.Title = gi.Spec.Title
 		target.Body = gi.Spec.Description
 		err = r.RepoClient.UpdateTicket(*target)
 		if err != nil {
@@ -193,4 +201,23 @@ func (r *GithubIssueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&trainingv1alpha1.GithubIssue{}).
 		Complete(r)
+}
+
+func (r *GithubIssueReconciler) getMatchingTarget(issueId int64, url, title string) (*gclient.GithubTicket, error) {
+	tickets, err := r.RepoClient.GetTickets(url)
+	if err != nil {
+		return nil, err
+	}
+
+	var target *gclient.GithubTicket
+	for _, t := range tickets {
+		if issueId != 0 && issueId == t.Number {
+			target = &t
+			break
+		} else if title == t.Title {
+			target = &t
+			break
+		}
+	}
+	return target, nil
 }
